@@ -79,6 +79,7 @@ export default function PortalView({ jobs, ads, onSwitchToAdmin }) {
             <div style={s.infoBlock}><p style={s.infoLabel}>Reference</p> <p style={s.infoValue}>{selectedJob.ref      || "—"}</p></div>
             <div style={s.infoBlock}><p style={s.infoLabel}>Location</p>  <p style={s.infoValue}>{selectedJob.centre   || "—"}</p></div>
             <div style={s.infoBlock}><p style={s.infoLabel}>Closing</p>   <p style={s.infoValue}>{selectedJob.closing  || "—"}</p></div>
+            {selectedJob.pageNumber && <div style={s.infoBlock}><p style={s.infoLabel}>Circular Page</p><p style={s.infoValue}>Page {selectedJob.pageNumber}</p></div>}
           </div>
 
           {selectedJob.requirements && (
@@ -241,6 +242,7 @@ export default function PortalView({ jobs, ads, onSwitchToAdmin }) {
                 <div style={s.cardFoot}>
                   <span><i className="ti ti-map-pin" style={{ marginRight: 4 }} />{locationLabel}</span>
                   {job.closing && <span><i className="ti ti-calendar" style={{ marginRight: 4 }} />Closes {job.closing.replace(/ at \d+:\d+$/, "")}</span>}
+                  {job.pageNumber && <span><i className="ti ti-book" style={{ marginRight: 4 }} />p.{job.pageNumber}</span>}
                 </div>
               </article>
             );
