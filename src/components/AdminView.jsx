@@ -2,9 +2,9 @@
 import { useState, useRef } from "react";
 import { getLevelStyle } from "../constants/psvData.js";
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 // Salary → level lookup (SA public service salary bands 2026)
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 const SALARY_LEVEL_MAP = {
   170226: "Level 02", 184704: "Level 03", 201093: "Level 04",
   221184: "Level 05", 237453: "Level 05", 255450: "Level 06",
@@ -44,9 +44,9 @@ function salaryToLevel(salaryStr) {
   return "Unknown";
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 // Category inference from title / department
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 function inferCategory(title, dept) {
   const t = (title + " " + dept).toLowerCase();
   if (/\b(director|chief director|dg|ddg|manager|head of|ceo|cfo|coo)\b/.test(t)) return "Management";
@@ -63,8 +63,8 @@ function inferCategory(title, dept) {
   return "Administration";
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Accurate PSV circular parser
+// ────────────────────────────────────────────────────────���───────────────────
+// Improved PSV circular parser (handles pdf.js text without newlines)
 // Format:  POST XX/YY : TITLE [multi-line] (REF NO: xxx)
 //          [Branch/Directorate lines]
 //          SALARY : Rxxx (Level N)
@@ -74,28 +74,37 @@ function inferCategory(title, dept) {
 //          ENQUIRIES : ...
 //          APPLICATIONS : ...
 //          CLOSING DATE : DD Month YYYY
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 function parsePsvCircular(rawText, circularNo) {
   const jobs = [];
 
   // Split full text into per-post chunks on "POST XX/YY :" boundaries
-  const chunks = rawText.split(/(?=\nPOST \d+\/\d+\s*:)/);
+  // Use word boundary instead of newline since pdf.js strips newlines
+  const chunks = rawText.split(/(?=\bPOST\s+\d+\/\d+\s*:)/i);
+  
+  console.log(`[PDF Parser] Total chunks found: ${chunks.length}`);
+  console.log(`[PDF Parser] First 300 chars of text:`, rawText.slice(0, 300));
 
-  // We also need to know the department for each post — track it from ANNEXURE/DEPARTMENT headers
-  // Build a lookup: position in text → department name
-  const deptMatches = [...rawText.matchAll(/DEPARTMENT OF ([^\n]+)/g)];
-
-  for (const chunk of chunks) {
-    const postMatch = chunk.match(/^\nPOST (\d+)\/(\d+)\s*:\s*([\s\S]+?)(?=\nSALARY\s*:|\nCENTRE\s*:|\nREQUIREMENTS\s*:)/i);
-    if (!postMatch) continue;
+  for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
+    const chunk = chunks[chunkIdx];
+    
+    // Extract POST number and title
+    // Changed from ^\nPOST to ^[\s]*POST to handle missing newlines
+    const postMatch = chunk.match(/^[\s]*POST\s+(\d+)\/(\d+)\s*:\s*([\s\S]+?)(?=\s(?:SALARY|CENTRE|REQUIREMENTS)\s*:)/i);
+    
+    if (!postMatch) {
+      console.log(`[PDF Parser] Chunk ${chunkIdx} - No POST match found`);
+      continue;
+    }
 
     const postNo  = `${postMatch[1]}/${postMatch[2]}`;
     const rawTitle = postMatch[3];
+    console.log(`[PDF Parser] Found POST ${postNo}`);
 
     // Clean title: strip REF NO continuation, Directorate/Branch lines, extra whitespace
     const title = rawTitle
       .replace(/\(?\s*REF\s*NO[:\s][\s\S]*/i, "")   // remove (REF NO: ...
-      .replace(/REF\s*NO[:\s].*/gi, "")                   // remove REF NO: ...
+      .replace(/REF\s*NO[:\s].*/gi, "")              // remove REF NO: ...
       .replace(/^(?:Directorate|Branch|Chief Directorate|Sub-?Directorate)[:\s].+$/gim, "")
       .replace(/\s+/g, " ")
       .trim()
@@ -106,44 +115,45 @@ function parsePsvCircular(rawText, circularNo) {
     const refMatch = chunk.match(/REF\s*NO[:\s]+([^\n\)]+)/i);
     const ref = refMatch ? refMatch[1].trim().replace(/\)$/, "").trim() : "";
 
-    // SALARY
-    const salaryMatch = chunk.match(/SALARY\s*:\s*(.+?)(?=\n)/i);
+    // SALARY - use flexible whitespace instead of requiring newline
+    const salaryMatch = chunk.match(/SALARY\s*:\s*(.+?)(?=\s(?:CENTRE|REQUIREMENTS|DUTIES|ENQUIRIES|APPLICATIONS|CLOSING DATE)\s*:)/i);
     const salaryRaw   = salaryMatch ? salaryMatch[1].trim() : "";
     const salary      = salaryRaw.replace(/\s+/g, " ");
     const level       = salaryToLevel(salary);
 
-    // CENTRE
-    const centreMatch = chunk.match(/CENTRE\s*:\s*(.+?)(?=\n)/i);
+    // CENTRE - use flexible whitespace
+    const centreMatch = chunk.match(/CENTRE\s*:\s*(.+?)(?=\s(?:REQUIREMENTS|DUTIES|ENQUIRIES|APPLICATIONS|CLOSING DATE)\s*:)/i);
     const centre      = centreMatch ? centreMatch[1].trim().replace(/\.$/, "").trim() : "";
 
     // Find department: last DEPARTMENT OF before this post in full text
-    const postIdx   = rawText.indexOf(`\nPOST ${postNo} :`);
-    const textBefore = rawText.slice(0, postIdx > 0 ? postIdx : rawText.indexOf(`POST ${postNo} :`));
-    const allDepts  = [...textBefore.matchAll(/DEPARTMENT OF ([^\n]+)/g)];
+    const postIdx   = rawText.indexOf(`POST ${postNo} :`);
+    const textBefore = rawText.slice(0, postIdx > 0 ? postIdx : rawText.indexOf(`POST ${postNo}`));
+    const allDepts  = [...textBefore.matchAll(/DEPARTMENT\s+OF\s+([^\n]+)/gi)];
     const department = allDepts.length > 0
       ? allDepts[allDepts.length - 1][1].trim()
       : "";
 
     // CLOSING DATE
-    const closingMatch = chunk.match(/CLOSING DATE\s*:\s*(.+?)(?=\n)/i);
+    const closingMatch = chunk.match(/CLOSING\s+DATE\s*:\s*(.+?)(?=\s(?:REQUIREMENTS|DUTIES|ENQUIRIES|APPLICATIONS|NOTE)\s*:|\s*$)/i);
     let closing = closingMatch ? closingMatch[1].trim() : "";
     // Strip trailing time if present, keep date only for display
     closing = closing.replace(/\s+at\s+\d+:\d+.*$/i, "").trim();
     if (!closing) closing = "See circular";
 
     // REQUIREMENTS (first 450 chars, cleaned)
-    const reqMatch = chunk.match(/REQUIREMENTS\s*:\s*([\s\S]+?)(?=\nDUTIES\s*:|\nENQUIRIES\s*:|\nAPPLICATIONS\s*:|\nCLOSING DATE\s*:|$)/i);
+    const reqMatch = chunk.match(/REQUIREMENTS\s*:\s*([\s\S]+?)(?=\s(?:DUTIES|ENQUIRIES|APPLICATIONS|CLOSING DATE)\s*:|\s*$)/i);
     const requirements = reqMatch
       ? reqMatch[1].replace(/\s+/g, " ").trim().slice(0, 450)
       : "";
 
     // ENQUIRIES
-    const enqMatch = chunk.match(/ENQUIRIES\s*:\s*([\s\S]+?)(?=\nAPPLICATIONS\s*:|\nNOTE\s*:|\nCLOSING DATE\s*:|\nPOST \d|$)/i);
+    const enqMatch = chunk.match(/ENQUIRIES\s*:\s*([\s\S]+?)(?=\s(?:APPLICATIONS|NOTE|CLOSING DATE)\s*:|\s*$)/i);
     const enquiries = enqMatch ? enqMatch[1].replace(/\s+/g, " ").trim() : "";
 
     const category = inferCategory(title, department);
 
     if (title.length > 2) {
+      console.log(`[PDF Parser] Parsed: ${title} (${level})`);
       jobs.push({
         postNo, title, ref, salary, level,
         centre, department, closing,
@@ -153,12 +163,13 @@ function parsePsvCircular(rawText, circularNo) {
     }
   }
 
+  console.log(`[PDF Parser] Total jobs parsed: ${jobs.length}`);
   return jobs;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 // Component
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 export default function AdminView({ jobs, setJobs, ads, setAds, onViewPortal }) {
   const [adminTab, setAdminTab]   = useState("circulars");
   const [newAd, setNewAd]         = useState({ title: "", subtitle: "", cta: "", color: "#0A2540", position: "sidebar" });
@@ -199,14 +210,18 @@ export default function AdminView({ jobs, setJobs, ads, setAds, onViewPortal }) 
       for (let p = 1; p <= pdf.numPages; p++) {
         const page    = await pdf.getPage(p);
         const content = await page.getTextContent();
-        // Reconstruct lines by joining items with spaces; add newline per page
-        fullText += "\n" + content.items.map(i => i.str).join(" ") + "\n";
+        // Join items with spaces (pdf.js doesn't preserve newlines)
+        // Add a space between pages to prevent word concatenation
+        fullText += " " + content.items.map(i => i.str).join(" ") + " ";
         if (p % 20 === 0) setUploadMsg(`Extracting… page ${p}/${pdf.numPages}`);
       }
+      
+      // Clean up multiple spaces
+      fullText = fullText.replace(/\s+/g, " ").trim();
 
       // Detect circular number from filename or PDF header
       const fileNumMatch = file.name.match(/circular[_\s-]*(\d+)/i) || file.name.match(/(\d{1,3})/);
-      const headerMatch  = fullText.match(/PUBLICATION NO (\d+) OF/i);
+      const headerMatch  = fullText.match(/PUBLICATION\s+NO\s+(\d+)\s+OF/i);
       const circularNo   = headerMatch
         ? parseInt(headerMatch[1], 10)
         : fileNumMatch ? parseInt(fileNumMatch[1], 10)
@@ -222,7 +237,7 @@ export default function AdminView({ jobs, setJobs, ads, setAds, onViewPortal }) 
         setUploadMsg(`✓ Circular ${circularNo} of 2026 — ${parsed.length} posts loaded.`);
       }
     } catch (err) {
-      console.error(err);
+      console.error("[PDF Parser] Error:", err);
       setUploadMsg(`✗ Error: ${err.message || "Could not read PDF."}`);
     } finally {
       setUploading(false);
@@ -412,7 +427,7 @@ const a = {
   page:          { minHeight:"100dvh", background:"#F5F5F7", fontFamily:"system-ui, sans-serif" },
   header:        { background:"#1C1C1E", padding:"12px 16px", paddingTop:"calc(12px + var(--safe-top))", display:"flex", alignItems:"center", justifyContent:"space-between" },
   logoGroup:     { display:"flex", alignItems:"center", gap:10 },
-  logoBadge:     { width:34, height:34, borderRadius:9, background:"linear-gradient(135deg,#2563EB,#1E40AF)", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontWeight:800, fontSize:11, flexShrink:0 },
+  logoBadge:     { width:34, height:34, borderRadius:9, background:"linear-gradient(135deg,#2563EB,#1E40AF)", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontWeight:700, fontSize:11 },
   adminTitle:    { color:"#EBEBF5", fontSize:14, fontWeight:700, margin:0, lineHeight:1.2 },
   subTitle:      { color:"#636366", fontSize:11, margin:0 },
   portalBtn:     { background:"rgba(255,255,255,0.1)", border:"none", borderRadius:8, padding:"7px 12px", color:"#EBEBF5", fontSize:13, fontWeight:500, cursor:"pointer" },
@@ -429,7 +444,7 @@ const a = {
   listItem:      { background:"#fff", border:"1px solid #F0F0F0", borderRadius:12, padding:"12px 14px", marginBottom:8, display:"flex", justifyContent:"space-between", alignItems:"center" },
   liveBadge:     { fontSize:11, fontWeight:600, background:"#F0FDF4", color:"#166534", padding:"3px 10px", borderRadius:20, border:"1px solid #BBF7D0", flexShrink:0 },
   actionBtn:     { background:"#2563EB", color:"#fff", border:"none", borderRadius:10, padding:"9px 16px", fontSize:14, fontWeight:600, cursor:"pointer" },
-  cancelBtn:     { background:"transparent", border:"1px solid #E5E5EA", borderRadius:10, padding:"9px 16px", fontSize:14, color:"#636366", cursor:"pointer" },
+  cancelBtn:     { background:"#F5F5F7", border:"none", borderRadius:10, padding:"9px 16px", fontSize:14, color:"#636366", cursor:"pointer" },
   removeBtn:     { background:"transparent", border:"1px solid #FECACA", borderRadius:8, padding:"4px 10px", fontSize:12, color:"#EF4444", flexShrink:0, cursor:"pointer" },
   formCard:      { background:"#fff", border:"1px solid #E5E5EA", borderRadius:14, padding:"14px", marginBottom:16 },
   input:         { width:"100%", height:42, border:"1px solid #E5E5EA", borderRadius:10, paddingInline:12, fontSize:15, background:"#F9F9F9", marginBottom:10, outline:"none", display:"block" },
