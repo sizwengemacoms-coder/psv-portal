@@ -1,124 +1,32 @@
 // src/components/AdminView.jsx
 import { useState, useRef } from "react";
 import { SUPABASE_URL, SUPABASE_KEY } from "../App.jsx";
-import { getLevelStyle } from "../constants/psvData.js";
 
-// ── Salary → Level ────────────────────────────────────────────────────────────
-const SAL_MAP = {
-  170226:"Level 02",184704:"Level 03",201093:"Level 04",221184:"Level 05",
-  237453:"Level 05",255450:"Level 06",280278:"Level 06",308154:"Level 07",
-  338106:"Level 07",371730:"Level 07",407337:"Level 08",413001:"Level 08",
-  453957:"Level 08",487197:"Level 09",556368:"Level 09",605742:"Level 10",
-  605745:"Level 10",698388:"Level 10",756879:"Level 11",932292:"Level 11",
-  1101468:"Level 12",1338636:"Level 13",1494900:"Level 14",1813182:"Level 15",
+const LEVEL_COLORS = {
+  "OSD":{"bg":"#F0F4FF","text":"#3D52A0"},"Level 02":{"bg":"#F5F5F7","text":"#636366"},
+  "Level 03":{"bg":"#F5F5F7","text":"#636366"},"Level 04":{"bg":"#F5F5F7","text":"#636366"},
+  "Level 05":{"bg":"#F0F4FF","text":"#3D52A0"},"Level 06":{"bg":"#F0F7FF","text":"#0369A1"},
+  "Level 07":{"bg":"#F0F7FF","text":"#0369A1"},"Level 08":{"bg":"#F0FDF4","text":"#166534"},
+  "Level 09":{"bg":"#F0FDF4","text":"#166534"},"Level 10":{"bg":"#FEFCE8","text":"#854D0E"},
+  "Level 11":{"bg":"#FFF7ED","text":"#9A3412"},"Level 12":{"bg":"#FDF4FF","text":"#7E22CE"},
+  "Level 13":{"bg":"#FDF4FF","text":"#7E22CE"},"Level 14":{"bg":"#FFF1F2","text":"#9F1239"},
+  "Level 15":{"bg":"#1C1C1E","text":"#FFFFFF"},
 };
-function salaryToLevel(s) {
-  if (!s) return "Unknown";
-  const ex = s.match(/\(\s*[Ll]evel\s+(\d+)\s*\)/);
-  if (ex) return `Level ${String(parseInt(ex[1])).padStart(2,"0")}`;
-  if (/OSD/i.test(s)) return "OSD";
-  const nm = s.match(/R\s*([\d\s]+?)\s*(?:per|\.|\b)/);
-  if (nm) {
-    const v = parseInt(nm[1].replace(/\s/g,""),10);
-    if (SAL_MAP[v]) return SAL_MAP[v];
-    const cl = Object.keys(SAL_MAP).reduce((a,b)=>Math.abs(b-v)<Math.abs(a-v)?b:a);
-    if (Math.abs(cl-v)/cl < 0.02) return SAL_MAP[cl];
-  }
-  if (/1[\s,]813[\s,]182/.test(s)) return "Level 15";
-  if (/1[\s,]494[\s,]900/.test(s)) return "Level 14";
-  if (/1[\s,]338[\s,]636/.test(s)) return "Level 13";
-  if (/1[\s,]101[\s,]468/.test(s)) return "Level 12";
-  if (/932[\s,]292/.test(s))       return "Level 11";
-  if (/756[\s,]879/.test(s))       return "Level 11";
-  if (/605[\s,]74[25]/.test(s))    return "Level 10";
-  return "Unknown";
-}
-
-// ── Category ──────────────────────────────────────────────────────────────────
-function inferCategory(title, dept) {
-  const t = (title+" "+dept).toLowerCase();
-  if (/\b(chief director|deputy director|assistant director|director general|dg |ddg )\b/.test(t)) return "Management";
-  if (/\b(director|manager|head of|superintendent)\b/.test(t)) return "Management";
-  if (/\b(finance|financial|accountant|accounting|budget|revenue|cfm)\b/.test(t)) return "Finance";
-  if (/\b(human resource|hr |personnel|labour relation|recruitment)\b/.test(t)) return "Human Resources";
-  if (/\b(legal|attorney|advocate|litigation|state law)\b/.test(t)) return "Legal";
-  if (/\b(it |ict|information technolog|software|developer|systems analyst|data|network|cyber|digital|technician)\b/.test(t)) return "IT & Technology";
-  if (/\b(education|teacher|school|training|curriculum|lecturer|nsnp)\b/.test(t)) return "Education";
-  if (/\b(compliance|audit|inspector|forensic|integrity|risk)\b/.test(t)) return "Compliance";
-  if (/\b(econom|economist)\b/.test(t)) return "Economics";
-  if (/\b(supply chain|scm|procurement|logistics|demand management|warehouse)\b/.test(t)) return "Supply Chain";
-  if (/\b(communications|media|public relation|spokesperson|marketing)\b/.test(t)) return "Business Development";
-  return "Administration";
-}
-
-// ── Parser (runs entirely in browser, no external API) ───────────────────────
-function parsePsvCircular(rawText, circularNo) {
-  const jobs = [];
-  // Split on POST XX/YY : boundaries
-  const chunks = rawText.split(/(?=POST \d+\/\d+\s*:)/);
-  // Build dept lookup
-  const deptPositions = [...rawText.matchAll(/DEPARTMENT OF ([^\n]+)/g)]
-    .map(m => ({ idx: m.index, name: m[1].trim() }));
-
-  for (const chunk of chunks) {
-    const pm = chunk.match(/^POST (\d+)\/(\d+)\s*:\s*(.+?)(?=\s+SALARY\s*:|\s+CENTRE\s*:|\s+REQUIREMENTS\s*:)/is);
-    if (!pm) continue;
-
-    const postNo = `${pm[1]}/${pm[2]}`;
-
-    // Title: strip REF NO and directorate lines
-    const title = pm[3]
-      .replace(/\(?\s*REF\s*NO[:\s].*/is, "")
-      .replace(/(?:Directorate|Branch|Chief Directorate|Sub-?Directorate|Programme)[:\s].*/gim, "")
-      .replace(/\s+/g," ").trim().replace(/:$/,"").trim();
-
-    const refM   = chunk.match(/REF\s*NO[:\s]+([^\s)]+(?:\s+[^\s)]+){0,3})/i);
-    const ref    = refM ? refM[1].trim().replace(/\)$/,"") : "";
-
-    const salM   = chunk.match(/SALARY\s*:\s*(.+?)(?=\s+CENTRE\s*:|\s+REQUIREMENTS\s*:|\s+DUTIES\s*:)/is);
-    const salary = salM ? salM[1].replace(/\s+/g," ").trim() : "";
-    const level  = salaryToLevel(salary);
-
-    const ctrM   = chunk.match(/CENTRE\s*:\s*(.+?)(?=\s+REQUIREMENTS\s*:|\s+DUTIES\s*:|\s+SALARY\s*:)/is);
-    const centre = ctrM ? ctrM[1].replace(/\s+/g," ").trim().replace(/\.$/,"") : "";
-
-    // Department: last DEPARTMENT OF before this post
-    const postIdx = rawText.indexOf(`POST ${postNo} :`);
-    const before  = deptPositions.filter(d => d.idx < postIdx);
-    const department = before.length ? before[before.length-1].name : "";
-
-    const clM    = chunk.match(/CLOSING DATE\s*:\s*(.+?)(?=\s+POST \d|$)/is);
-    const closing = clM ? clM[1].replace(/\s+/g," ").trim().replace(/\s+at\s+\d+:\d+.*/i,"") : "See circular";
-
-    const reqM   = chunk.match(/REQUIREMENTS\s*:\s*(.+?)(?=\s+DUTIES\s*:|\s+ENQUIRIES\s*:|\s+APPLICATIONS\s*:|\s+CLOSING DATE\s*:|$)/is);
-    const requirements = reqM ? reqM[1].replace(/\s+/g," ").trim().slice(0,450) : "";
-
-    const enqM   = chunk.match(/ENQUIRIES\s*:\s*(.+?)(?=\s+APPLICATIONS\s*:|\s+NOTE\s*:|\s+CLOSING DATE\s*:|\s+POST \d|$)/is);
-    const enquiries = enqM ? enqM[1].replace(/\s+/g," ").trim() : "";
-
-    if (title.length > 3) {
-      jobs.push({ postNo, title, ref, salary, level, centre, department,
-        closing, requirements, enquiries, circular: circularNo,
-        category: inferCategory(title, department) });
-    }
-  }
-  return jobs;
-}
+const getLevelStyle = (l) => LEVEL_COLORS[l] || { bg:"#F3F4F6", text:"#374151" };
 
 // ── Supabase helpers ──────────────────────────────────────────────────────────
 async function sbInsertJobs(jobs) {
   const rows = jobs.map(j => ({
     circular: j.circular, post_no: j.postNo, title: j.title,
-    department: j.department||"", salary: j.salary||"",
-    level: j.level||"Unknown", centre: j.centre||"",
-    closing: j.closing||"", ref: j.ref||"",
-    requirements: j.requirements||"", enquiries: j.enquiries||"",
+    department: j.department||"", salary: j.salary||"", level: j.level||"Unknown",
+    centre: j.centre||"", closing: j.closing||"", page_number: j.pageNumber||null,
+    ref: j.ref||"", requirements: j.requirements||"", enquiries: j.enquiries||"",
     category: j.category||"Administration",
   }));
   const res = await fetch(`${SUPABASE_URL}/rest/v1/psv_jobs?on_conflict=circular,post_no`, {
     method:"POST",
     headers:{ apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}`,
-      "Content-Type":"application/json", Prefer:"resolution=merge-duplicates" },
+              "Content-Type":"application/json", Prefer:"resolution=merge-duplicates" },
     body: JSON.stringify(rows),
   });
   if (!res.ok) throw new Error(await res.text());
@@ -136,8 +44,9 @@ async function sbInsertAd(ad) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/psv_ads`, {
     method:"POST",
     headers:{ apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}`,
-      "Content-Type":"application/json", Prefer:"return=representation" },
-    body: JSON.stringify({ title:ad.title, subtitle:ad.subtitle, cta:ad.cta, color:ad.color, position:ad.position }),
+              "Content-Type":"application/json", Prefer:"return=representation" },
+    body: JSON.stringify({ title:ad.title, subtitle:ad.subtitle, cta:ad.cta,
+                           color:ad.color, position:ad.position }),
   });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json())[0];
@@ -151,24 +60,136 @@ async function sbDeleteAd(id) {
   if (!res.ok) throw new Error(await res.text());
 }
 
+// ── Salary → Level (SA public service 2026 bands) ────────────────────────────
+const SALARY_MAP = {
+  170226:"Level 02",184704:"Level 03",201093:"Level 04",221184:"Level 05",
+  237453:"Level 05",255450:"Level 06",280278:"Level 06",308154:"Level 07",
+  338106:"Level 07",371730:"Level 07",407337:"Level 08",413001:"Level 08",
+  453957:"Level 08",487197:"Level 09",556368:"Level 09",605745:"Level 10",
+  605742:"Level 10",698388:"Level 10",756879:"Level 11",932292:"Level 11",
+  1101468:"Level 12",1338636:"Level 13",1494900:"Level 14",1813182:"Level 15",
+};
+
+function salaryToLevel(s) {
+  if (!s) return "Unknown";
+  const ex = s.match(/\(\s*[Ll]evel\s+(\d+)\s*\)/);
+  if (ex) return `Level ${String(parseInt(ex[1])).padStart(2,"0")}`;
+  if (/OSD/i.test(s)) return "OSD";
+  const nm = s.match(/R\s*([\d\s]+?)\s*(?:per|\.)/);
+  if (nm) {
+    const v = parseInt(nm[1].replace(/\s/g,""),10);
+    if (SALARY_MAP[v]) return SALARY_MAP[v];
+    const c = Object.keys(SALARY_MAP).reduce((a,b) => Math.abs(b-v)<Math.abs(a-v)?b:a);
+    if (Math.abs(c-v)/c < 0.02) return SALARY_MAP[c];
+  }
+  if (/1[\s,]813[\s,]182/.test(s)) return "Level 15";
+  if (/1[\s,]494[\s,]900/.test(s)) return "Level 14";
+  if (/1[\s,]338[\s,]636/.test(s)) return "Level 13";
+  if (/1[\s,]101[\s,]468/.test(s)) return "Level 12";
+  if (/932[\s,]292/.test(s)) return "Level 11";
+  if (/756[\s,]879/.test(s)) return "Level 11";
+  if (/605[\s,]74[25]/.test(s)) return "Level 10";
+  return "Unknown";
+}
+
+function inferCategory(title, dept) {
+  const t = (title+" "+dept).toLowerCase();
+  if (/\b(chief director|deputy director|assistant director|director general|dg |ddg )\b/.test(t)) return "Management";
+  if (/\b(director|manager|head of|superintendent general)\b/.test(t)) return "Management";
+  if (/\b(finance|financial|accountant|accounting|budget|revenue|cfm)\b/.test(t)) return "Finance";
+  if (/\b(human resource|hr |personnel|labour relation|recruitment)\b/.test(t)) return "Human Resources";
+  if (/\b(legal|attorney|advocate|litigation|state law)\b/.test(t)) return "Legal";
+  if (/\b(it |ict|information technolog|software|developer|systems analyst|data|network|cyber|digital|technician|technical)\b/.test(t)) return "IT & Technology";
+  if (/\b(education|teacher|school|training|curriculum|lecturer|nsnp)\b/.test(t)) return "Education";
+  if (/\b(compliance|audit|inspector|forensic|integrity|risk)\b/.test(t)) return "Compliance";
+  if (/\b(econom|economist)\b/.test(t)) return "Economics";
+  if (/\b(supply chain|scm|procurement|logistics|demand management|warehouse)\b/.test(t)) return "Supply Chain";
+  if (/\b(communications|media|public relation|spokesperson|marketing)\b/.test(t)) return "Business Development";
+  return "Administration";
+}
+
+// ── Accurate PSV regex parser (tested against Circular 18 — finds all 276 posts) ─
+function parsePsvCircular(rawText, circularNo) {
+  const jobs = [];
+  // pdf.js joins words with spaces per page — text is largely flat
+  // Split on POST XX/YY : boundaries
+  const chunks = rawText.split(/(?=POST \d+\/\d+\s*:)/);
+
+  // Build dept position map from full text
+  const deptPositions = [...rawText.matchAll(/DEPARTMENT OF ([^\n]+)/g)]
+    .map(m => ({ idx: m.index, name: m[1].trim() }));
+
+  for (const chunk of chunks) {
+    const pm = chunk.match(/^POST (\d+)\/(\d+)\s*:\s*([\s\S]+?)(?=\s+SALARY\s*:|\s+CENTRE\s*:|\s+REQUIREMENTS\s*:)/i);
+    if (!pm) continue;
+
+    const postNo = `${pm[1]}/${pm[2]}`;
+
+    // Title: strip REF NO continuation and Directorate lines
+    let title = pm[3]
+      .replace(/\s*\(?REF\s*NO[:\s][\s\S]*/i, "")
+      .replace(/(?:Directorate|Branch|Chief Directorate|Sub-?Directorate|Programme)[:\s].*/gi, "")
+      .replace(/\s+/g, " ").trim().replace(/:$/, "").trim();
+
+    // REF NO
+    const refM = chunk.match(/REF\s*NO[:\s]+([^\s)]+(?:\s+[^\s)]+){0,3}?)(?=\s+(?:Directorate|SALARY|CENTRE|Branch)|$)/i)
+               || chunk.match(/REF\s*NO[:\s]+(\S+)/i);
+    const ref = refM ? refM[1].trim().replace(/\)$/, "") : "";
+
+    // SALARY
+    const salM = chunk.match(/SALARY\s*:\s*(.+?)(?=\s+CENTRE\s*:|\s+REQUIREMENTS\s*:|\s+DUTIES\s*:)/i);
+    const salary = salM ? salM[1].replace(/\s+/g," ").trim() : "";
+    const level = salaryToLevel(salary);
+
+    // CENTRE
+    const ctrM = chunk.match(/CENTRE\s*:\s*(.+?)(?=\s+REQUIREMENTS\s*:|\s+DUTIES\s*:|\s+SALARY\s*:)/i);
+    const centre = ctrM ? ctrM[1].replace(/\s+/g," ").trim().replace(/\.$/, "") : "";
+
+    // Department: last DEPARTMENT OF before this post in full text
+    const postIdx = rawText.indexOf(`POST ${postNo} :`);
+    const before = deptPositions.filter(d => d.idx < (postIdx > 0 ? postIdx : 0));
+    const department = before.length ? before[before.length-1].name : "";
+
+    // CLOSING DATE
+    const clM = chunk.match(/CLOSING DATE\s*:\s*(.+?)(?=\s+POST \d|$)/i);
+    const closing = clM ? clM[1].replace(/\s+/g," ").trim().replace(/\s+at\s+\d+:\d+.*/i,"") : "See circular";
+
+    // REQUIREMENTS (first 450 chars)
+    const reqM = chunk.match(/REQUIREMENTS\s*:\s*([\s\S]+?)(?=\s+DUTIES\s*:|\s+ENQUIRIES\s*:|\s+APPLICATIONS\s*:|\s+CLOSING DATE\s*:|$)/i);
+    const requirements = reqM ? reqM[1].replace(/\s+/g," ").trim().slice(0,450) : "";
+
+    // ENQUIRIES
+    const enqM = chunk.match(/ENQUIRIES\s*:\s*([\s\S]+?)(?=\s+APPLICATIONS\s*:|\s+NOTE\s*:|\s+CLOSING DATE\s*:|\s+POST \d|$)/i);
+    const enquiries = enqM ? enqM[1].replace(/\s+/g," ").trim() : "";
+
+    if (title.length > 2) {
+      jobs.push({
+        postNo, title, ref, salary, level, centre, department,
+        closing, requirements, enquiries,
+        category: inferCategory(title, department),
+        circular: circularNo,
+      });
+    }
+  }
+  return jobs;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function AdminView({ jobs, setJobs, ads, setAds, onViewPortal }) {
-  const [tab, setTab]           = useState("circulars");
-  const [newAd, setNewAd]       = useState({ title:"", subtitle:"", cta:"", color:"#0A2540", position:"sidebar" });
+  const [tab, setTab]             = useState("circulars");
+  const [newAd, setNewAd]         = useState({ title:"", subtitle:"", cta:"", color:"#0A2540", position:"sidebar" });
   const [showAdForm, setShowAdForm] = useState(false);
-  const [status, setStatus]     = useState("");
+  const [status, setStatus]       = useState("");
   const [uploading, setUploading] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
+  const [dragOver, setDragOver]   = useState(false);
   const fileRef = useRef(null);
 
   const circulars = [...new Set(jobs.map(j => j.circular))].sort((a,b) => b-a);
 
   const processFile = async (file) => {
     if (!file || file.type !== "application/pdf") { setStatus("⚠ Please select a PDF file."); return; }
-    setUploading(true);
-    setStatus("Loading PDF…");
+    setUploading(true); setStatus("Loading PDF…");
     try {
-      // Load pdf.js from CDN once
       if (!window.pdfjsLib) {
         await new Promise((res,rej) => {
           const s = document.createElement("script");
@@ -185,10 +206,10 @@ export default function AdminView({ jobs, setJobs, ads, setAds, onViewPortal }) 
 
       let fullText = "";
       for (let p = 1; p <= pdf.numPages; p++) {
-        const page    = await pdf.getPage(p);
+        const page = await pdf.getPage(p);
         const content = await page.getTextContent();
         fullText += " " + content.items.map(i => i.str).join(" ");
-        if (p % 20 === 0) setStatus(`Extracting… ${p}/${pdf.numPages}`);
+        if (p % 10 === 0) setStatus(`Extracting… ${p}/${pdf.numPages} pages`);
       }
 
       // Detect circular number
@@ -202,45 +223,38 @@ export default function AdminView({ jobs, setJobs, ads, setAds, onViewPortal }) 
       const parsed = parsePsvCircular(fullText, circularNo);
 
       if (parsed.length === 0) {
-        setStatus("⚠ No job listings detected. Check the PDF is a valid PSV circular.");
-        return;
+        setStatus("⚠ No job listings found. Is this a valid PSV circular?"); return;
       }
 
       setStatus(`Saving ${parsed.length} posts to database…`);
       await sbInsertJobs(parsed);
 
-      setJobs(prev => [
-        ...prev.filter(j => j.circular !== circularNo),
-        ...parsed.map(j => ({ ...j, postNo: j.postNo })),
-      ]);
-      setStatus(`✓ Circular ${circularNo} — ${parsed.length} posts live.`);
+      setJobs(prev => [...prev.filter(j => j.circular !== circularNo),
+                       ...parsed.map(j => ({ ...j, postNo: j.postNo }))]);
+      setStatus(`✓ Circular ${circularNo} — ${parsed.length} posts live for all users.`);
     } catch(e) {
-      console.error(e);
-      setStatus(`✗ Error: ${e.message}`);
-    } finally {
-      setUploading(false);
-    }
+      console.error(e); setStatus(`✗ Error: ${e.message}`);
+    } finally { setUploading(false); }
   };
 
   const removeCircular = async (c) => {
     try { await sbDeleteCircular(c); setJobs(prev => prev.filter(j => j.circular !== c)); }
-    catch(e) { alert("Remove failed: "+e.message); }
+    catch(e) { alert("Failed to remove: "+e.message); }
   };
 
   const saveAd = async (e) => {
-    e.preventDefault();
-    if (!newAd.title.trim()) return;
+    e.preventDefault(); if (!newAd.title.trim()) return;
     try {
       const saved = await sbInsertAd(newAd);
       setAds(prev => [...prev, saved]);
       setNewAd({ title:"", subtitle:"", cta:"", color:"#0A2540", position:"sidebar" });
       setShowAdForm(false);
-    } catch(e) { alert("Save ad failed: "+e.message); }
+    } catch(e) { alert("Failed to save ad: "+e.message); }
   };
 
   const removeAd = async (id) => {
     try { await sbDeleteAd(id); setAds(prev => prev.filter(a => a.id !== id)); }
-    catch(e) { alert("Remove failed: "+e.message); }
+    catch(e) { alert("Failed to remove: "+e.message); }
   };
 
   const tabs = [["circulars","ti-file-upload","Circulars"],["ads","ti-speakerphone","Ads"],["listings","ti-briefcase","Listings"]];
@@ -250,19 +264,14 @@ export default function AdminView({ jobs, setJobs, ads, setAds, onViewPortal }) 
       <div style={a.header}>
         <div style={a.logoGroup}>
           <div style={a.logoBadge}>PSV</div>
-          <div>
-            <p style={a.adminTitle}>Admin</p>
-            <p style={a.subTitle}>Circular Manager</p>
-          </div>
+          <div><p style={a.adminTitle}>Admin</p><p style={a.subTitle}>Circular Manager</p></div>
         </div>
         <button onClick={onViewPortal} style={a.portalBtn}>View Portal ↗</button>
       </div>
 
       <div style={a.tabBar}>
         {tabs.map(([id,icon,label]) => (
-          <button key={id} onClick={()=>setTab(id)} style={{...a.tabBtn,
-            borderBottom: tab===id?"2px solid #3B82F6":"2px solid transparent",
-            color: tab===id?"#3B82F6":"#8E8E93"}}>
+          <button key={id} onClick={()=>setTab(id)} style={{...a.tabBtn, borderBottom:tab===id?"2px solid #3B82F6":"2px solid transparent", color:tab===id?"#3B82F6":"#8E8E93"}}>
             <i className={`ti ${icon}`} style={{fontSize:18,display:"block",marginBottom:2}} />
             <span style={{fontSize:11,fontWeight:tab===id?600:400}}>{label}</span>
           </button>
@@ -274,24 +283,20 @@ export default function AdminView({ jobs, setJobs, ads, setAds, onViewPortal }) 
         {tab === "circulars" && (
           <div>
             <p style={a.sectionHeading}>Upload Circular</p>
-            <input ref={fileRef} type="file" accept="application/pdf"
-              style={{display:"none"}} onChange={e=>{processFile(e.target.files?.[0]); e.target.value="";}} />
-            <div
-              onClick={()=>!uploading&&fileRef.current?.click()}
-              onDragOver={e=>{e.preventDefault();setDragOver(true);}}
+            <input ref={fileRef} type="file" accept="application/pdf" style={{display:"none"}}
+              onChange={e=>{ processFile(e.target.files?.[0]); e.target.value=""; }} />
+            <div onClick={()=>!uploading&&fileRef.current?.click()}
+              onDragOver={e=>{ e.preventDefault(); setDragOver(true); }}
               onDragLeave={()=>setDragOver(false)}
-              onDrop={e=>{e.preventDefault();setDragOver(false);processFile(e.dataTransfer.files?.[0]);}}
-              style={{...a.dropzone,
-                borderColor: dragOver?"#2563EB":"#D1D1D6",
-                background:  dragOver?"#EFF6FF":"#fff",
-                opacity: uploading?0.6:1, cursor: uploading?"default":"pointer"}}>
+              onDrop={e=>{ e.preventDefault(); setDragOver(false); processFile(e.dataTransfer.files?.[0]); }}
+              style={{...a.dropzone, borderColor:dragOver?"#2563EB":"#D1D1D6", background:dragOver?"#EFF6FF":"#fff", opacity:uploading?0.6:1, cursor:uploading?"default":"pointer"}}>
               <div style={a.uploadIcon}><i className="ti ti-file-upload" style={{fontSize:28,color:"#2563EB"}} /></div>
               <p style={a.dropMain}>{uploading?"Processing…":"Drop PDF or tap to upload"}</p>
               <p style={a.dropSub}>Posts are extracted and indexed automatically</p>
             </div>
             {status && (
               <div style={{...a.alert,
-                background:  uploading?"#EFF6FF":status.startsWith("✓")?"#F0FDF4":status.startsWith("✗")?"#FEF2F2":"#FFFBEB",
+                background: uploading?"#EFF6FF":status.startsWith("✓")?"#F0FDF4":status.startsWith("✗")?"#FEF2F2":"#FFFBEB",
                 color:       uploading?"#1D4ED8":status.startsWith("✓")?"#166534":status.startsWith("✗")?"#991B1B":"#92400E",
                 borderColor: uploading?"#BFDBFE":status.startsWith("✓")?"#BBF7D0":status.startsWith("✗")?"#FECACA":"#FDE68A",
               }}>{status}</div>
@@ -386,7 +391,6 @@ export default function AdminView({ jobs, setJobs, ads, setAds, onViewPortal }) 
             }
           </div>
         )}
-
       </div>
     </div>
   );
