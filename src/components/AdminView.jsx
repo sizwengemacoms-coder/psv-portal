@@ -16,13 +16,17 @@ const getLevelStyle = (l) => LEVEL_COLORS[l] || { bg:"#F3F4F6", text:"#374151" }
 
 // ── Supabase helpers ──────────────────────────────────────────────────────────
 async function sbInsertJobs(jobs) {
-  const rows = jobs.map(j => ({
+  const rawRows = jobs.map(j => ({
     circular: j.circular, post_no: j.postNo, title: j.title,
     department: j.department||"", salary: j.salary||"", level: j.level||"Unknown",
     centre: j.centre||"", closing: j.closing||"", page_number: j.pageNumber||null,
     ref: j.ref||"", requirements: j.requirements||"", enquiries: j.enquiries||"",
     category: j.category||"Administration",
   }));
+  // Dedupe by circular+post_no — last occurrence wins
+  const seen = new Map();
+  rawRows.forEach(r => seen.set(r.circular+"/"+r.post_no, r));
+  const rows = [...seen.values()];
   const res = await fetch(`${SUPABASE_URL}/rest/v1/psv_jobs?on_conflict=circular,post_no`, {
     method:"POST",
     headers:{ apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}`,
