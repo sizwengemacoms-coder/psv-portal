@@ -67,7 +67,9 @@ export default function App() {
         ]);
         const [jobData, adData] = await Promise.all([jr.json(), ar.json()]);
         setJobs(Array.isArray(jobData) ? jobData.map(j => ({
-          ...j, postNo: j.post_no, pageNumber: j.page_number
+          ...j,
+          postNo: String(j.post_no ?? j.postNo ?? ''),
+          pageNumber: j.page_number ?? j.pageNumber ?? null,
         })) : []);
         setAds(Array.isArray(adData) ? adData : []);
       } catch(e) { console.error(e); }
