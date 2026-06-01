@@ -78,92 +78,115 @@ function inferCategory(title, dept) {
 function parsePsvCircular(rawText, circularNo) {
   const jobs = [];
 
-  // Split full text into per-post chunks on "POST XX/YY :" boundaries
-  // FIXED: Use word boundary with proper word separator before POST
-  const chunks = rawText.split(/(?=POST\s+\d+\/\d+\s*:)/i);
-  
-  console.log(`[PDF Parser] Total chunks found: ${chunks.length}`);
-  console.log(`[PDF Parser] First 300 chars of text:`, rawText.slice(0, 300));
-
-  for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
-    const chunk = chunks[chunkIdx];
-    
-    // Extract POST number and title
-    // Match: POST XXX/YY : title text until next field
-    const postMatch = chunk.match(/POST\s+(\d+)\/(\d+)\s*:\s*([\s\S]+?)(?=\s+(?:SALARY|CENTRE|REQUIREMENTS)\s*:)/i);
-    
-    if (!postMatch) {
-      console.log(`[PDF Parser] Chunk ${chunkIdx} - No POST match found`);
-      continue;
-    }
-
-    const postNo  = `${postMatch[1]}/${postMatch[2]}`;
-    const rawTitle = postMatch[3];
-    console.log(`[PDF Parser] Found POST ${postNo}`);
-
-    // Clean title: strip REF NO continuation, Directorate/Branch lines, extra whitespace
-    const title = rawTitle
-      .replace(/\(?\s*REF\s*NO[:\s][\s\S]*/i, "")   // remove (REF NO: ...
-      .replace(/REF\s*NO[:\s].*/gi, "")              // remove REF NO: ...
-      .replace(/^(?:Directorate|Branch|Chief Directorate|Sub-?Directorate)[:\s].+$/gim, "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .replace(/:$/, "")
-      .trim();
-
-    // REF NO (can be on title line or next lines)
-    const refMatch = chunk.match(/REF\s*NO[:\s]+([^\n\)]+)/i);
-    const ref = refMatch ? refMatch[1].trim().replace(/\)$/, "").trim() : "";
-
-    // SALARY - use flexible whitespace instead of requiring newline
-    const salaryMatch = chunk.match(/SALARY\s*:\s*(.+?)(?=\s+(?:CENTRE|REQUIREMENTS|DUTIES|ENQUIRIES|APPLICATIONS|CLOSING DATE)\s*:)/i);
-    const salaryRaw   = salaryMatch ? salaryMatch[1].trim() : "";
-    const salary      = salaryRaw.replace(/\s+/g, " ");
-    const level       = salaryToLevel(salary);
-
-    // CENTRE - use flexible whitespace
-    const centreMatch = chunk.match(/CENTRE\s*:\s*(.+?)(?=\s+(?:REQUIREMENTS|DUTIES|ENQUIRIES|APPLICATIONS|CLOSING DATE)\s*:)/i);
-    const centre      = centreMatch ? centreMatch[1].trim().replace(/\.$/, "").trim() : "";
-
-    // Find department: last DEPARTMENT OF before this post in full text
-    const postIdx   = rawText.indexOf(`POST ${postNo} :`);
-    const textBefore = rawText.slice(0, postIdx > 0 ? postIdx : rawText.indexOf(`POST ${postNo}`));
-    const allDepts  = [...textBefore.matchAll(/DEPARTMENT\s+OF\s+([^\n]+)/gi)];
-    const department = allDepts.length > 0
-      ? allDepts[allDepts.length - 1][1].trim()
-      : "";
-
-    // CLOSING DATE
-    const closingMatch = chunk.match(/CLOSING\s+DATE\s*:\s*(.+?)(?=\s+(?:REQUIREMENTS|DUTIES|ENQUIRIES|APPLICATIONS|NOTE|POST\s+\d+\/\d+)\s*:|\s*$)/i);
-    let closing = closingMatch ? closingMatch[1].trim() : "";
-    // Strip trailing time if present, keep date only for display
-    closing = closing.replace(/\s+at\s+\d+:\d+.*$/i, "").trim();
-    if (!closing) closing = "See circular";
-
-    // REQUIREMENTS (first 450 chars, cleaned)
-    const reqMatch = chunk.match(/REQUIREMENTS\s*:\s*([\s\S]+?)(?=\s+(?:DUTIES|ENQUIRIES|APPLICATIONS|CLOSING DATE|POST\s+\d+\/\d+)\s*:|\s*$)/i);
-    const requirements = reqMatch
-      ? reqMatch[1].replace(/\s+/g, " ").trim().slice(0, 450)
-      : "";
-
-    // ENQUIRIES
-    const enqMatch = chunk.match(/ENQUIRIES\s*:\s*([\s\S]+?)(?=\s+(?:APPLICATIONS|NOTE|CLOSING DATE|POST\s+\d+\/\d+)\s*:|\s*$)/i);
-    const enquiries = enqMatch ? enqMatch[1].replace(/\s+/g, " ").trim() : "";
-
-    const category = inferCategory(title, department);
-
-    if (title.length > 2) {
-      console.log(`[PDF Parser] Parsed: ${title} (${level})`);
-      jobs.push({
-        postNo, title, ref, salary, level,
-        centre, department, closing,
-        requirements, enquiries, category,
-        circular: circularNo,
-      });
-    }
+  // ── Step 1: Strip preamble ─────────────────────────────────────────
+  // Everything before "OTHER POSTS" or "ANNEXURE A" or the first POST XX/YY
+  // is boilerplate (index, instructions). Drop it.
+  const firstPostIdx = rawText.search(/\bPOST\s+\d+\/\d+\b/i);
+  if (firstPostIdx === -1) {
+    console.log("[PDF Parser] No POST XX/YY found in text");
+    return jobs;
   }
 
-  console.log(`[PDF Parser] Total jobs parsed: ${jobs.length}`);
+  // Walk back to find "OTHER POSTS" or "ANNEXURE" section heading before firstPost
+  const preambleEnd = (() => {
+    const slice = rawText.slice(0, firstPostIdx);
+    const markers = [
+      /OTHER\s+POSTS\s*$/im,
+      /ANNEXURE\s+[A-Z]+\s*$/im,
+      /DEPARTMENT\s+OF\s+[A-Z]/im,
+    ];
+    let best = 0;
+    for (const m of markers) {
+      const match = slice.search(m);
+      if (match !== -1 && match > best) best = match;
+    }
+    return best;
+  })();
+
+  const body = rawText.slice(preambleEnd);
+
+  // ── Step 2: Split on POST XX/YY boundaries ─────────────────────────
+  // PSV circulars use POST <circularNo>/<postSeq> : TITLE
+  // e.g. "POST 14/96 : DEPUTY DIRECTOR"
+  const chunks = body.split(/(?=\bPOST\s+\d+\/\d+\b)/i).filter(c => /\bPOST\s+\d+\/\d+\b/i.test(c));
+
+  console.log(`[PDF Parser] Body chunks: ${chunks.length}`);
+
+  // Track department across chunks (resets per annexure/department heading)
+  let currentDept = "";
+
+  for (const chunk of chunks) {
+    // ── Detect department heading before POST in this chunk ────────
+    const deptMatch = chunk.match(/DEPARTMENT\s+OF\s+([A-Z][^\n\.]{3,60}?)(?=\s+POST\s+\d+)/i);
+    if (deptMatch) currentDept = deptMatch[1].trim();
+
+    // Also check for "DEPARTMENT OF X" anywhere before the POST keyword in this chunk
+    const prePost = chunk.slice(0, chunk.search(/\bPOST\s+\d+\/\d+\b/i));
+    const deptInPre = prePost.match(/DEPARTMENT\s+OF\s+([A-Z][^\n]{3,60})/i);
+    if (deptInPre) currentDept = deptInPre[1].trim();
+
+    // ── POST number ────────────────────────────────────────────────
+    const postNumMatch = chunk.match(/\bPOST\s+(\d+)\/(\d+)\b/i);
+    if (!postNumMatch) continue;
+    const postNo = `${postNumMatch[1]}/${postNumMatch[2]}`;
+
+    // ── Title: text after POST XX/YY until REF NO or first field ──
+    const afterPost = chunk.slice(postNumMatch.index + postNumMatch[0].length);
+    const titleRaw = afterPost
+      .replace(/^\s*:\s*/, "")                        // strip leading colon
+      .match(/^(.+?)(?=\s+(?:REF\s*NO|SALARY|CENTRE|REQUIREMENTS|DUTIES|ENQUIRIES)\s*:)/i);
+
+    if (!titleRaw) continue;
+
+    const title = titleRaw[1]
+      .replace(/\(\s*REF\s*NO[\s\S]*/i, "")
+      .replace(/REF\s*NO[:\s].*/gi, "")
+      .replace(/\b(Directorate|Branch|Chief Directorate|Sub-?Directorate)\s*:.*/gi, "")
+      .replace(/\s+/g, " ").trim().replace(/:$/, "").trim();
+
+    if (!title || title.length < 3) continue;
+
+    // ── REF NO ────────────────────────────────────────────────────
+    const refMatch = chunk.match(/REF\s*NO[:\s]+([\w\/\s]+?)(?=\s+(?:SALARY|CENTRE|REQUIREMENTS|\())/i);
+    const ref = refMatch ? refMatch[1].trim() : "";
+
+    // ── SALARY ────────────────────────────────────────────────────
+    const salaryMatch = chunk.match(/SALARY\s*:\s*(.+?)(?=\s+(?:CENTRE|REQUIREMENTS|DUTIES|ENQUIRIES|APPLICATIONS|CLOSING\s+DATE)\s*:)/i);
+    const salary = salaryMatch ? salaryMatch[1].replace(/\s+/g, " ").trim() : "";
+    const level = salaryToLevel(salary);
+
+    // ── CENTRE ────────────────────────────────────────────────────
+    const centreMatch = chunk.match(/CENTRE\s*:\s*(.+?)(?=\s+(?:REQUIREMENTS|DUTIES|ENQUIRIES|APPLICATIONS|CLOSING\s+DATE|NOTE)\s*:)/i);
+    const centre = centreMatch ? centreMatch[1].replace(/\s+/g, " ").trim().replace(/\.$/, "") : "";
+
+    // ── CLOSING DATE ──────────────────────────────────────────────
+    const closingMatch = chunk.match(/CLOSING\s+DATE\s*:\s*(.+?)(?=\s+(?:NOTE|REQUIREMENTS|POST\s+\d+\/\d+|$))/i);
+    let closing = closingMatch ? closingMatch[1].replace(/\s+at\s+\d+[:.].*/i, "").replace(/\s+/g, " ").trim() : "See circular";
+
+    // ── REQUIREMENTS ──────────────────────────────────────────────
+    const reqMatch = chunk.match(/REQUIREMENTS\s*:\s*([\s\S]+?)(?=\s+(?:DUTIES|ENQUIRIES|APPLICATIONS|CLOSING\s+DATE|NOTE|POST\s+\d+\/\d+)\s*:)/i);
+    const requirements = reqMatch ? reqMatch[1].replace(/\s+/g, " ").trim().slice(0, 500) : "";
+
+    // ── ENQUIRIES ─────────────────────────────────────────────────
+    const enqMatch = chunk.match(/ENQUIRIES\s*:\s*([\s\S]+?)(?=\s+(?:APPLICATIONS|NOTE|CLOSING\s+DATE|POST\s+\d+\/\d+)\s*:)/i);
+    const enquiries = enqMatch ? enqMatch[1].replace(/\s+/g, " ").trim() : "";
+
+    // ── Department fallback: scan full text before this post ──────
+    if (!currentDept) {
+      const posInFull = rawText.indexOf(`POST ${postNo}`);
+      if (posInFull > 0) {
+        const before = rawText.slice(0, posInFull);
+        const allDepts = [...before.matchAll(/DEPARTMENT\s+OF\s+([A-Z][^\n.]{3,60})/gi)];
+        if (allDepts.length) currentDept = allDepts[allDepts.length - 1][1].trim();
+      }
+    }
+
+    const category = inferCategory(title, currentDept);
+
+    jobs.push({ postNo, title, ref, salary, level, centre, department: currentDept, closing, requirements, enquiries, category, circular: circularNo });
+  }
+
+  console.log(`[PDF Parser] Parsed ${jobs.length} jobs`);
   return jobs;
 }
 
