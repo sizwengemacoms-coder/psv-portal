@@ -311,11 +311,11 @@ export default function AdminView({ jobs, setJobs, ads, setAds, onViewPortal }) 
             {showAdForm && (
               <form onSubmit={saveAd} style={a.formCard}>
                 <p style={{fontWeight:600,fontSize:14,marginBottom:12}}>New Advertisement</p>
-                <input required placeholder="Headline" value={newAd.title} onChange={e=>setNewAd(p=>{...p,title:e.target.value})} style={a.input} />
-                <input placeholder="Subline" value={newAd.subtitle} onChange={e=>setNewAd(p=>{...p,subtitle:e.target.value})} style={a.input} />
-                <input placeholder="CTA label" value={newAd.cta} onChange={e=>setNewAd(p=>{...p,cta:e.target.value})} style={a.input} />
+                <input required placeholder="Headline" value={newAd.title} onChange={e=>setNewAd(p=>({...p,title:e.target.value})} style={a.input} />
+                <input placeholder="Subline" value={newAd.subtitle} onChange={e=>setNewAd(p=>({...p,subtitle:e.target.value})} style={a.input} />
+                <input placeholder="CTA label" value={newAd.cta} onChange={e=>setNewAd(p=>({...p,cta:e.target.value})} style={a.input} />
                 <div style={a.selectWrap}>
-                  <select value={newAd.position} onChange={e=>setNewAd(p=>{...p,position:e.target.value})} style={a.select}>
+                  <select value={newAd.position} onChange={e=>setNewAd(p=>({...p,position:e.target.value})} style={a.select}>
                     <option value="sidebar">Sidebar</option>
                     <option value="banner">Top Banner</option>
                   </select>
@@ -323,7 +323,7 @@ export default function AdminView({ jobs, setJobs, ads, setAds, onViewPortal }) 
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:10,margin:"10px 0"}}>
                   <label style={{fontSize:13,color:"#636366"}}>Background Color</label>
-                  <input type="color" value={newAd.color} onChange={e=>setNewAd(p=>{...p,color:e.target.value})} style={{width:40,height:32,border:"1px solid #E5E5EA",borderRadius:6}} />
+                  <input type="color" value={newAd.color} onChange={e=>setNewAd(p=>({...p,color:e.target.value})} style={{width:40,height:32,border:"1px solid #E5E5EA",borderRadius:6}} />
                 </div>
                 <div style={{display:"flex",gap:8,marginTop:4}}>
                   <button type="submit" style={a.actionBtn}>Save</button>
