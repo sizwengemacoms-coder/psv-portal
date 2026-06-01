@@ -63,7 +63,7 @@ function inferCategory(title, dept) {
   return "Administration";
 }
 
-// ────────────────────────────────────────────────────────���───────────────────
+// ────────────────────────────────────────────────────────────────────────────
 // Improved PSV circular parser (handles pdf.js text without newlines)
 // Format:  POST XX/YY : TITLE [multi-line] (REF NO: xxx)
 //          [Branch/Directorate lines]
@@ -79,8 +79,8 @@ function parsePsvCircular(rawText, circularNo) {
   const jobs = [];
 
   // Split full text into per-post chunks on "POST XX/YY :" boundaries
-  // Use word boundary instead of newline since pdf.js strips newlines
-  const chunks = rawText.split(/(?=\bPOST\s+\d+\/\d+\s*:)/i);
+  // FIXED: Use word boundary with proper word separator before POST
+  const chunks = rawText.split(/(?=POST\s+\d+\/\d+\s*:)/i);
   
   console.log(`[PDF Parser] Total chunks found: ${chunks.length}`);
   console.log(`[PDF Parser] First 300 chars of text:`, rawText.slice(0, 300));
@@ -89,8 +89,8 @@ function parsePsvCircular(rawText, circularNo) {
     const chunk = chunks[chunkIdx];
     
     // Extract POST number and title
-    // Changed from ^\nPOST to ^[\s]*POST to handle missing newlines
-    const postMatch = chunk.match(/^[\s]*POST\s+(\d+)\/(\d+)\s*:\s*([\s\S]+?)(?=\s(?:SALARY|CENTRE|REQUIREMENTS)\s*:)/i);
+    // Match: POST XXX/YY : title text until next field
+    const postMatch = chunk.match(/POST\s+(\d+)\/(\d+)\s*:\s*([\s\S]+?)(?=\s+(?:SALARY|CENTRE|REQUIREMENTS)\s*:)/i);
     
     if (!postMatch) {
       console.log(`[PDF Parser] Chunk ${chunkIdx} - No POST match found`);
@@ -116,13 +116,13 @@ function parsePsvCircular(rawText, circularNo) {
     const ref = refMatch ? refMatch[1].trim().replace(/\)$/, "").trim() : "";
 
     // SALARY - use flexible whitespace instead of requiring newline
-    const salaryMatch = chunk.match(/SALARY\s*:\s*(.+?)(?=\s(?:CENTRE|REQUIREMENTS|DUTIES|ENQUIRIES|APPLICATIONS|CLOSING DATE)\s*:)/i);
+    const salaryMatch = chunk.match(/SALARY\s*:\s*(.+?)(?=\s+(?:CENTRE|REQUIREMENTS|DUTIES|ENQUIRIES|APPLICATIONS|CLOSING DATE)\s*:)/i);
     const salaryRaw   = salaryMatch ? salaryMatch[1].trim() : "";
     const salary      = salaryRaw.replace(/\s+/g, " ");
     const level       = salaryToLevel(salary);
 
     // CENTRE - use flexible whitespace
-    const centreMatch = chunk.match(/CENTRE\s*:\s*(.+?)(?=\s(?:REQUIREMENTS|DUTIES|ENQUIRIES|APPLICATIONS|CLOSING DATE)\s*:)/i);
+    const centreMatch = chunk.match(/CENTRE\s*:\s*(.+?)(?=\s+(?:REQUIREMENTS|DUTIES|ENQUIRIES|APPLICATIONS|CLOSING DATE)\s*:)/i);
     const centre      = centreMatch ? centreMatch[1].trim().replace(/\.$/, "").trim() : "";
 
     // Find department: last DEPARTMENT OF before this post in full text
@@ -134,20 +134,20 @@ function parsePsvCircular(rawText, circularNo) {
       : "";
 
     // CLOSING DATE
-    const closingMatch = chunk.match(/CLOSING\s+DATE\s*:\s*(.+?)(?=\s(?:REQUIREMENTS|DUTIES|ENQUIRIES|APPLICATIONS|NOTE)\s*:|\s*$)/i);
+    const closingMatch = chunk.match(/CLOSING\s+DATE\s*:\s*(.+?)(?=\s+(?:REQUIREMENTS|DUTIES|ENQUIRIES|APPLICATIONS|NOTE|POST\s+\d+\/\d+)\s*:|\s*$)/i);
     let closing = closingMatch ? closingMatch[1].trim() : "";
     // Strip trailing time if present, keep date only for display
     closing = closing.replace(/\s+at\s+\d+:\d+.*$/i, "").trim();
     if (!closing) closing = "See circular";
 
     // REQUIREMENTS (first 450 chars, cleaned)
-    const reqMatch = chunk.match(/REQUIREMENTS\s*:\s*([\s\S]+?)(?=\s(?:DUTIES|ENQUIRIES|APPLICATIONS|CLOSING DATE)\s*:|\s*$)/i);
+    const reqMatch = chunk.match(/REQUIREMENTS\s*:\s*([\s\S]+?)(?=\s+(?:DUTIES|ENQUIRIES|APPLICATIONS|CLOSING DATE|POST\s+\d+\/\d+)\s*:|\s*$)/i);
     const requirements = reqMatch
       ? reqMatch[1].replace(/\s+/g, " ").trim().slice(0, 450)
       : "";
 
     // ENQUIRIES
-    const enqMatch = chunk.match(/ENQUIRIES\s*:\s*([\s\S]+?)(?=\s(?:APPLICATIONS|NOTE|CLOSING DATE)\s*:|\s*$)/i);
+    const enqMatch = chunk.match(/ENQUIRIES\s*:\s*([\s\S]+?)(?=\s+(?:APPLICATIONS|NOTE|CLOSING DATE|POST\s+\d+\/\d+)\s*:|\s*$)/i);
     const enquiries = enqMatch ? enqMatch[1].replace(/\s+/g, " ").trim() : "";
 
     const category = inferCategory(title, department);
