@@ -23,8 +23,9 @@ export default function PortalView({ jobs, ads, onSwitchToAdmin }) {
       .filter(j => {
         const matchCat    = filterCategory === "All" || j.category === filterCategory;
         const matchLevel  = filterLevel === "All Levels" || j.level === filterLevel;
-        const matchCirc   = filterCircular === "All" || j.circular === parseInt(filterCircular, 10);
-        const matchCentre = !filterCentre || (j.centre || "").toLowerCase().includes(filterCentre.toLowerCase());
+        const matchCirc   = filterCircular === "All" || Number(j.circular) === Number(filterCircular);
+        const searchQ = filterCentre.toLowerCase();
+        const matchCentre = !filterCentre || (j.centre || "").toLowerCase().includes(searchQ) || (j.title || "").toLowerCase().includes(searchQ);
         return matchCat && matchLevel && matchCirc && matchCentre;
       })
       .sort((a, b) => {
