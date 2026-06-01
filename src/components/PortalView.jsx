@@ -1,6 +1,6 @@
 // src/components/PortalView.jsx
 import { useState, useMemo } from "react";
-import { CATEGORIES, LEVELS, getLevelStyle } from "../constants/psvData";
+import { CATEGORIES, LEVELS, getLevelStyle } from "../constants/psvData.js";
 
 export default function PortalView({ jobs, ads, onSwitchToAdmin }) {
   const [selectedJob, setSelectedJob] = useState(null);
