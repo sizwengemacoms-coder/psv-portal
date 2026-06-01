@@ -144,6 +144,12 @@ function parsePsvCircular(rawText, circularNo) {
 
     const postNo = `${pm[1]}/${pm[2]}`;
 
+    // Find the most recent page marker before this POST in the full text
+    const postIdx = rawText.indexOf(`POST ${postNo} :`);
+    const textBefore = postIdx > 0 ? rawText.slice(0, postIdx) : "";
+    const pageMarkers = [...textBefore.matchAll(/~~PAGE(\d+)~~/g)];
+    const pageNumber = pageMarkers.length > 0 ? parseInt(pageMarkers[pageMarkers.length-1][1]) : null;
+
     // Title: strip REF NO continuation and Directorate lines
     let title = pm[3]
       .replace(/\s*\(?REF\s*NO[:\s][\s\S]*/i, "")
@@ -187,6 +193,7 @@ function parsePsvCircular(rawText, circularNo) {
         closing, requirements, enquiries,
         category: inferCategory(title, department),
         circular: circularNo,
+        pageNumber,
       });
     }
   }
@@ -227,7 +234,7 @@ export default function AdminView({ jobs, setJobs, ads, setAds, onViewPortal }) 
       for (let p = 1; p <= pdf.numPages; p++) {
         const page = await pdf.getPage(p);
         const content = await page.getTextContent();
-        fullText += " " + content.items.map(i => i.str).join(" ");
+        fullText += " ~~PAGE" + p + "~~ " + content.items.map(i => i.str).join(" ");
         if (p % 10 === 0) setStatus(`Extracting… ${p}/${pdf.numPages} pages`);
       }
 
