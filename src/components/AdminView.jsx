@@ -16,24 +16,39 @@ const getLevelStyle = (l) => LEVEL_COLORS[l] || { bg:"#F3F4F6", text:"#374151" }
 
 // ── Supabase helpers ──────────────────────────────────────────────────────────
 async function sbInsertJobs(jobs) {
-  const rawRows = jobs.map(j => ({
-    circular: j.circular, post_no: j.postNo, title: j.title,
-    department: j.department||"", salary: j.salary||"", level: j.level||"Unknown",
-    centre: j.centre||"", closing: j.closing||"", page_number: j.pageNumber||null,
-    ref: j.ref||"", requirements: j.requirements||"", enquiries: j.enquiries||"",
-    category: j.category||"Administration",
-  }));
-  // Dedupe by circular+post_no — last occurrence wins
-  const seen = new Map();
-  rawRows.forEach(r => seen.set(r.circular+"/"+r.post_no, r));
-  const rows = [...seen.values()];
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/psv_jobs?on_conflict=circular,post_no`, {
-    method:"POST",
-    headers:{ apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}`,
-              "Content-Type":"application/json", Prefer:"resolution=merge-duplicates" },
-    body: JSON.stringify(rows),
+  if (jobs.length === 0) return;
+  const circular = jobs[0].circular;
+
+  // Step 1: delete all existing rows for this circular
+  const del = await fetch(`${SUPABASE_URL}/rest/v1/psv_jobs?circular=eq.${circular}`, {
+    method: "DELETE",
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!del.ok) throw new Error(await del.text());
+
+  // Step 2: dedupe client-side
+  const seen = new Map();
+  jobs.forEach(j => seen.set(j.postNo, j));
+  const unique = [...seen.values()];
+
+  // Step 3: insert in chunks of 50 (no upsert needed — table is clean)
+  const CHUNK = 50;
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    const rows = unique.slice(i, i + CHUNK).map(j => ({
+      circular: j.circular, post_no: j.postNo, title: j.title,
+      department: j.department||"", salary: j.salary||"", level: j.level||"Unknown",
+      centre: j.centre||"", closing: j.closing||"", page_number: j.pageNumber||null,
+      ref: j.ref||"", requirements: j.requirements||"", enquiries: j.enquiries||"",
+      category: j.category||"Administration",
+    }));
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/psv_jobs`, {
+      method: "POST",
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`,
+                 "Content-Type": "application/json", Prefer: "return=minimal" },
+      body: JSON.stringify(rows),
+    });
+    if (!res.ok) throw new Error(await res.text());
+  }
 }
 
 async function sbDeleteCircular(circular) {
