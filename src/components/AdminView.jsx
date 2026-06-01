@@ -1,6 +1,6 @@
 // src/components/AdminView.jsx
 import { useState } from "react";
-import { getLevelStyle } from "../../constants/psvData";
+import { getLevelStyle } from "../constants/psvData";
 
 export default function AdminView({ jobs, ads, setAds, onViewPortal }) {
   const [adminTab, setAdminTab] = useState("circulars");
